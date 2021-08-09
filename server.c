@@ -14,19 +14,17 @@
 #define DATA_BUFF_SIZE 1024
 #define PROPER_ARG_SIZE 2
 
-/// TODO modify client_info function
 int serverClientInfo(struct sockaddr_in * a_client_address) {
     char * ip_address = inet_ntoa(a_client_address->sin_addr);
     char port_number[5] = {0, };
 
     sprintf(port_number, "%d", a_client_address->sin_port);
-    write(STDOUT_FILENO, "==========Client info==========\n", 33);
-    write(STDOUT_FILENO, "client IP: ", 12);
+    write(STDOUT_FILENO, "client IP: ", strlen("client IP: "));
     write(STDOUT_FILENO, ip_address, strlen(ip_address));
 
-    write(STDOUT_FILENO, "\n\nclient port: ", 16);
+    write(STDOUT_FILENO, "\nclient port: ", strlen("\nclient port: "));
     write(STDOUT_FILENO, port_number,  strlen(port_number));
-    write(STDOUT_FILENO, "\n===============================\n", 34);
+    printf("\n");
     return 0;
 }
 
@@ -36,12 +34,11 @@ void serverQuit(int a_connection_fd) {
 }
 
 int main(int argc, char *argv[]) {
-    int socket_fd, connection_fd;
-    long command_length;
-    unsigned int client_address_length;
+    int serv_socket_fd, cli_conn_fd;
+    socklen_t cli_addr_size;
+    ssize_t recv_cmd_len;
     struct sockaddr_in server_address, client_address;
-    char command_buf[DATA_BUFF_SIZE];
-    FILE *fp_checkIP;
+    char receive_cmd_buf[DATA_BUFF_SIZE];
 
     // arguments size has to be 2
     if(argc != PROPER_ARG_SIZE) {
@@ -49,66 +46,70 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    /// Control Connection Setup - Socket -> Bind -> Listen
-    if ((socket_fd = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
+    /// 0. Control Connection Setup - Socket -> Bind -> Listen
+    if ((serv_socket_fd = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
         write(STDERR_FILENO, "Server: Can't open stream socket\n", strlen("Server: Can't open stream socket\n"));
         exit(1);
     }
 
-    // socket
+    // 0.1 socket
     memset(&server_address, 0, sizeof(server_address));
     server_address.sin_family = AF_INET;
     server_address.sin_addr.s_addr = htonl(INADDR_ANY);
     server_address.sin_port = htons((int)strtol(argv[1], (char **)NULL, 10));
 
-    // bind
-    if(bind(socket_fd, (struct sockaddr *)&server_address, sizeof(server_address)) < 0) {
+    // 0.2 bind
+    if(bind(serv_socket_fd, (struct sockaddr *)&server_address, sizeof(server_address)) < 0) {
         write(STDERR_FILENO, "Server: Cant bind local address.\n", strlen("Server: Cant bind local address.\n"));
         exit(1);
     }
 
-    // listen: MAX concurrent client
-    listen(socket_fd, 1);
+    // 0.3 listen: MAX concurrent client
+    listen(serv_socket_fd, 1);
+
+    write(STDOUT_FILENO, "Server: Socket Created, Listening...\n", strlen("Server: Socket Created, Listening...\n"));
 
     /// loop - COMMANDS
     while(1) {
-        client_address_length = sizeof(client_address);
+        cli_addr_size = sizeof(client_address);
 
-        /// client: Connect -> server: Accept
-        connection_fd = accept(socket_fd, (struct sockaddr *)&client_address, &client_address_length);
-        if(connection_fd < 0) {
+        /// 2. client: Connect -> server: Accept
+        cli_conn_fd = accept(serv_socket_fd, (struct sockaddr *)&client_address, &cli_addr_size);
+        if(cli_conn_fd < 0) {
             write(STDERR_FILENO, "Server: accept() failed.\n", strlen("Server: accept() failed.\n"));
             exit(1);
         }
-        if(serverClientInfo(&client_address) < 0){
-            write(STDERR_FILENO, "Server: client_info() err!!\n", strlen("Server: client_info() err!!\n"));
-        }
+//        if(serverClientInfo(&client_address) < 0){
+//            write(STDERR_FILENO, "Server: client_info() err!!\n", strlen("Server: client_info() err!!\n"));
+//        }
         /// Multi-Threaded
 
-        /// Authentication: IP Address
+        /// 3. Authentication: IP Address
         // success
         write(STDOUT_FILENO, "Server: ** Client is connected **\n", strlen("Server: ** Client is connected **\n"));
-        write(connection_fd, "220 Akgop.github.io Connected\n", strlen("220 Akgop.github.io Connected\n"));
+        write(cli_conn_fd, "220 Akgop.github.io Connected\n", strlen("220 Akgop.github.io Connected\n"));
 
         /// Command Process
         while(1) {
-            memset(command_buf, 0, sizeof(command_buf));
+            memset(receive_cmd_buf, 0, sizeof(receive_cmd_buf));
 
-            // read command
-            if (read(connection_fd, command_buf, CTRL_BUFF_SIZE) < 0) {
+            /// 6. read command
+            if (read(cli_conn_fd, receive_cmd_buf, CTRL_BUFF_SIZE) < 0) {
                 write(STDERR_FILENO, "Server: read() error\n", strlen("Server: read() error\n"));
-                continue;
+                break;
             }
+            //receive_cmd_buf[recv_cmd_len] = '\0';
 
-            /// close Connections
-            if (!strncmp(command_buf, "QUIT", strlen("QUIT"))) {
+            /// 7. close Connections
+            if (!strncmp(receive_cmd_buf, "QUIT", strlen("QUIT"))) {
                 write(STDOUT_FILENO, "Server: QUIT\n", strlen("Server: QUIT\n"));
-                serverQuit(connection_fd);
+                serverQuit(cli_conn_fd);
                 exit(0);
             }
             else {
-                write(STDOUT_FILENO, command_buf, CTRL_BUFF_SIZE);
+                write(STDOUT_FILENO, receive_cmd_buf, CTRL_BUFF_SIZE);
             }
         }
+
     }
 }
