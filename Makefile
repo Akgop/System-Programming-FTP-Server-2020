@@ -1,10 +1,10 @@
 CC = gcc
 all: cli srv
 
-cli: cli.c
+cli: client.c
 	$(CC) -o $@ $<
 
-srv: srv.c
+srv: server.c
 	$(CC) -o $@ $<
 
 clean:
