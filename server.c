@@ -31,9 +31,7 @@ int serverClientInfo(struct sockaddr_in * a_client_address) {
 }
 
 void serverQuit(int a_connection_fd) {
-    char s_message_buf[CTRL_BUFF_SIZE];
-    memset(s_message_buf, 0, sizeof(s_message_buf));
-    write(a_connection_fd, s_message_buf, CTRL_BUFF_SIZE);
+    write(a_connection_fd, "221 Goodbye.\n", CTRL_BUFF_SIZE);
     close(a_connection_fd);
 }
 

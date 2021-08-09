@@ -124,6 +124,9 @@ int main(int argc, char * argv[]) {
         // receive response
         read(socket_fd, ctrl_receive_buf, CTRL_BUFF_SIZE);
         write(STDOUT_FILENO, ctrl_receive_buf, CTRL_BUFF_SIZE);
-        break;
+        if (!strncmp(ctrl_receive_buf, "221", 3)) {
+            break;
+        }
     }
+    close(socket_fd);
 }
