@@ -12,14 +12,47 @@
 /// Buffer Sizes
 #define CTRL_BUFF_SIZE 128      // control connection port number
 #define DATA_BUFF_SIZE 1024   // for receive buffer from server
-#define DATA_PORT_NUM 5000     // data connection port number
+
 #define PROPER_ARG_SIZE 3
-// TODO define MAX BUFFER SIZE
-#define MAX_BUFF_SIZE 9999    // packet size?
+#define COMMAND_OPTION_SIZE 64
+
 
 /// HTTP Status Code
 #define ACCEPTED "220"
+#define QUIT "221"
 #define REJECTED "530"
+
+
+// TODO Optimize Convert Function
+int clientConvertCommand(char * a_user_cmd, char * a_ftp_cmd) {
+    int opt_count = 0;
+    char * opt_value[COMMAND_OPTION_SIZE];
+    opt_value[opt_count] = strtok(a_user_cmd, " \n");
+    while(opt_value[opt_count]) {
+        opt_count++;
+        opt_value[opt_count] = strtok(NULL, " \n");
+    }
+    if (opt_count < 1) return -1;
+    else if(!strcmp(opt_value[0], "pwd")) {
+        int opt, idx;
+        opterr = 0;
+        optind = 1;
+        if(opt_count > 1) return -1;
+        while ((opt = getopt(opt_count, opt_value, "")) != -1) {
+            if (opt == '?') return -1;
+            else            break;
+        }
+        strcpy(a_ftp_cmd, "PWD");
+        for(idx = optind; idx < opt_count; idx++) {
+            strcat(a_ftp_cmd, " ");
+            strcat(a_ftp_cmd, opt_value[idx]);
+        }
+    }
+    else if(!strcmp(opt_value[0], "quit")) {
+        strcat(a_ftp_cmd, "QUIT");
+    }
+    return 0;
+}
 
 void clientAddressToString(char* a_ip_port, unsigned long a_ip_address, unsigned int a_port_number)
 {
@@ -48,13 +81,57 @@ int clientIsIPAcceptable(char* msg) {
     return 0;
 }
 
+/// Client-Side Create Socket
+// return client socket file descriptor
+int clientCreateSocket(struct sockaddr_in * a_cli_addr, char ** a_argv) {
+    int s_cli_socket_fd;
+    if ((s_cli_socket_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0 ) {
+        write(STDERR_FILENO, "Client: Can't open stream socket\n", strlen("Client: Can't open stream socket\n"));
+        exit(1);
+    }
+    a_cli_addr->sin_family = AF_INET;    // set client info
+    a_cli_addr->sin_addr.s_addr = inet_addr(a_argv[1]); // IP ADDRESS
+    a_cli_addr->sin_port = htons((int)strtol(a_argv[2], (char **)NULL, 10)); // PORT NUMBER
+    return s_cli_socket_fd;
+}
+
+/// Send Control Connection to Server
+void clientCreateConnection(int a_cli_socket_fd, struct sockaddr_in a_cli_addr) {
+    if (connect(a_cli_socket_fd, (struct sockaddr *)&a_cli_addr, sizeof(a_cli_addr))){
+        write(STDERR_FILENO, "Client: connection failed\n", strlen("Client: connection failed\n"));
+        exit(1);
+    }
+}
+
+/// Send Control Commands to Server
+void clientSendCommand(int a_cli_socket_fd) {
+    // Get user input
+    char s_user_input_buf[CTRL_BUFF_SIZE] = {0, };
+    char s_cli_cmd_buf[CTRL_BUFF_SIZE] = {0, };
+    ssize_t input_len;
+    while(1){
+        memset(s_user_input_buf, 0, CTRL_BUFF_SIZE);
+        memset(s_cli_cmd_buf, 0, CTRL_BUFF_SIZE);
+        write(STDOUT_FILENO, "ftp> ", strlen("ftp> "));
+        input_len = read(STDIN_FILENO, s_user_input_buf, CTRL_BUFF_SIZE);
+        s_user_input_buf[input_len] = '\0';
+
+        // Convert User Command to FTP Command
+        if (!clientConvertCommand(s_user_input_buf, s_cli_cmd_buf)) {
+            break;
+        }
+        printf("Client: illegal command\n\n");
+    }
+
+    printf("---> %s\n\n", s_cli_cmd_buf);
+    write(a_cli_socket_fd, s_cli_cmd_buf, CTRL_BUFF_SIZE);
+}
+
+
 /// main function
-// Purpose	: FTP client driver
 int main(int argc, char * argv[]) {
     struct sockaddr_in cli_addr;
     char ip_address_and_port_number[DATA_BUFF_SIZE];
-    char cli_cmd_buf[CTRL_BUFF_SIZE];
-    char user_input_buf[CTRL_BUFF_SIZE];
     char ctrl_receive_buf[CTRL_BUFF_SIZE];
     int cli_socket_fd;
     long input_length;
@@ -65,21 +142,18 @@ int main(int argc, char * argv[]) {
     }
 
     /// 0. control connection setup: Socket
-    // create socket
-    if ((cli_socket_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0 ) {
-        write(STDERR_FILENO, "Client: Can't open stream socket\n", strlen("Client: Can't open stream socket\n"));
-        exit(1);
-    }
     memset(&cli_addr, 0, sizeof(cli_addr));
-    cli_addr.sin_family = AF_INET;    // set client info
-    cli_addr.sin_addr.s_addr = inet_addr(argv[1]); // IP ADDRESS
-    cli_addr.sin_port = htons((int)strtol(argv[2], (char **)NULL, 10)); // PORT NUMBER
+    cli_socket_fd = clientCreateSocket(&cli_addr, argv);
 
     /// 1. client: Connect -> server: Accept
-    if (connect(cli_socket_fd, (struct sockaddr *)&cli_addr, sizeof(cli_addr))){
-        write(STDERR_FILENO, "Client: connection failed\n", strlen("Client: connection failed\n"));
-        exit(1);
-    }
+    clientCreateConnection(cli_socket_fd, cli_addr);
+
+    /// data connection pre-processing
+    //    clientAddressToString(ip_address_and_port_number, cli_addr.sin_addr.s_addr, DATA_PORT_NUM);
+    //    write(STDOUT_FILENO, "\n", strlen("\n"));
+
+    /// Authentication
+    /// whether IP ADDRESS acceptable
     /// 4. receive response
     memset(ctrl_receive_buf, 0, sizeof(ctrl_receive_buf));
     if (read(cli_socket_fd, ctrl_receive_buf, CTRL_BUFF_SIZE) < 0 ){
@@ -91,39 +165,19 @@ int main(int argc, char * argv[]) {
         exit(1);
     }
 
-    /// data connection setup
-//    clientAddressToString(ip_address_and_port_number, cli_addr.sin_addr.s_addr, DATA_PORT_NUM);
-//    write(STDOUT_FILENO, "\n", strlen("\n"));
-
-    /// Authentication
-    /// whether IP ADDRESS acceptable
-
     /// login to server - MAX 3 TIMES
 
     /// Command Process
     while(1) {
-        memset(cli_cmd_buf, 0, sizeof(cli_cmd_buf));
         memset(ctrl_receive_buf, 0, sizeof(ctrl_receive_buf));
-        memset(user_input_buf, 0, sizeof(user_input_buf));
 
-        /// 5. read user command
-        write(STDOUT_FILENO, "ftp> ", strlen("ftp> "));
-        input_length = read(STDIN_FILENO, user_input_buf, CTRL_BUFF_SIZE);
-        user_input_buf[input_length] = '\0';
-
-        /// 5.1 convert USER COMMAND to FTP COMMAND
-
-        /// 5.2 send command
-        strcpy(cli_cmd_buf, user_input_buf);
-        write(STDOUT_FILENO, "---> ", strlen("---> "));
-        write(STDOUT_FILENO, cli_cmd_buf, strlen(cli_cmd_buf));
-        write(STDOUT_FILENO, "\n", strlen("\n"));
-        write(cli_socket_fd, cli_cmd_buf, CTRL_BUFF_SIZE);
+        /// 5. send Command
+        clientSendCommand(cli_socket_fd);
 
         /// 8. receive response
         read(cli_socket_fd, ctrl_receive_buf, CTRL_BUFF_SIZE);
         write(STDOUT_FILENO, ctrl_receive_buf, strlen(ctrl_receive_buf));
-        if (!strncmp(ctrl_receive_buf, "221", 3)) {
+        if (!strncmp(ctrl_receive_buf, QUIT, 3)) {
             break;
         }
     }
