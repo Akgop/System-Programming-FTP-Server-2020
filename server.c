@@ -15,15 +15,47 @@
 #define PROPER_ARG_SIZE 2
 
 
+/// TODO optimize CWD
+int serverCWD(int a_cli_conn_fd, int a_opt_count, char ** a_opt_value) {
+    char s_ctrl_res_buf[CTRL_BUFF_SIZE];
+    memset(s_ctrl_res_buf, 0, sizeof(s_ctrl_res_buf));
+    if(chdir(a_opt_value[1]) == -1){	//change directory
+        sprintf(s_ctrl_res_buf, "550 %s: Can’t find such file or directory.\n", a_opt_value[1]);
+        write(a_cli_conn_fd, s_ctrl_res_buf, CTRL_BUFF_SIZE);	//send msg to client
+        return -1;
+    }
+    else{	//success
+        strcpy(s_ctrl_res_buf, "250 CWD command succeeds.\n");
+        write(a_cli_conn_fd, s_ctrl_res_buf, CTRL_BUFF_SIZE);	//send msg to client
+        return 0;
+    }
+}
+
+
+/// TODO optimze CDUP
+int serverCDUP(int a_cli_conn_fd) {
+    char s_ctrl_res_buf[CTRL_BUFF_SIZE];
+    memset(s_ctrl_res_buf, 0, sizeof(s_ctrl_res_buf));
+    if(chdir("..") == -1){	//change directory with ".."
+        sprintf(s_ctrl_res_buf, "550 '..': Can’t find such file or directory.\n");
+        write(a_cli_conn_fd, s_ctrl_res_buf, CTRL_BUFF_SIZE);	//send msg to client
+        return -1;
+    }
+    else{
+        strcpy(s_ctrl_res_buf, "250 CDUP command succeeds.\n");
+        write(a_cli_conn_fd, s_ctrl_res_buf, CTRL_BUFF_SIZE);	//send msg to client
+    }
+    return 0;
+}
+
 /// Server-side PWD
-// TODO Optimize serverPWD
 int serverPWD(int a_cli_conn_fd)
 {
-    char result[CTRL_BUFF_SIZE] = {0, };
-    char msg_buff[CTRL_BUFF_SIZE] = {0, };
-    if(getcwd(result, CTRL_BUFF_SIZE)){	//if no error on getcwd
-        sprintf(msg_buff, "257 %s is current directory.\n", result);
-        write(a_cli_conn_fd, msg_buff, CTRL_BUFF_SIZE);	//send msg to client
+    char s_pwd_result[CTRL_BUFF_SIZE] = {0, };
+    char s_ctrl_res_buf[CTRL_BUFF_SIZE] = {0, };
+    if(getcwd(s_pwd_result, CTRL_BUFF_SIZE)){	//if no error on getcwd
+        sprintf(s_ctrl_res_buf, "257 %s is current directory.\n", s_pwd_result);
+        write(a_cli_conn_fd, s_ctrl_res_buf, CTRL_BUFF_SIZE);	//send msg to client
         return 0;
     }
     else return -1;
@@ -84,12 +116,108 @@ int serverAcceptConnection(int a_serv_socket_fd, struct sockaddr_in * a_cli_addr
     return s_cli_conn_fd;
 }
 
+/// Server-side Response Command from Client
 void serverReceiveCommand(int a_cli_conn_fd, char * a_recv_cmd_buf) {
     if (read(a_cli_conn_fd, a_recv_cmd_buf, CTRL_BUFF_SIZE) < 0) {
         write(STDERR_FILENO, "Server: read() error\n", strlen("Server: read() error\n"));
         exit(1);
     }
 }
+
+/// Server-side Parse Client's Data Port & IP Address
+void serverParsingIpPort(char * a_cmd, char * a_ip, unsigned int * a_port) {
+    for (int i = 0; i < 3; i++) {
+        strcat(a_ip, strtok(NULL, ","));
+        strcat(a_ip, ".");
+    }
+    strcat(a_ip, strtok(NULL, ","));
+    *a_port = strtol(strtok(NULL, ","), (char **)NULL, 10)
+            + (strtol(strtok(NULL, ","), (char **)NULL, 10) << 8);
+}
+
+/// TODO Error Handling, 변수 이름 제대로
+void serverDataConnection(int a_cli_conn_fd, char * a_ip, unsigned int a_port, char * a_recv_cmd_buf) {
+    int s_data_fd;
+    struct sockaddr_in s_data_addr;
+    char * s_cmd = NULL;
+
+    if ((s_data_fd = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
+        printf("Server: Can't open stream socket\n");
+        exit(-1);
+    }
+
+    memset(&s_data_addr, 0, sizeof(s_data_addr));
+    s_data_addr.sin_family = AF_INET;
+    s_data_addr.sin_addr.s_addr = inet_addr(a_ip);
+    s_data_addr.sin_port = htons(a_port);
+
+    /// 6. Data Connection Setup: Socket -> Connect
+    if (connect(s_data_fd, (struct sockaddr *)&s_data_addr, sizeof(s_data_addr))){
+        write(STDERR_FILENO, "Server: connection failed\n", strlen("Client: connection failed\n"));
+        exit(1);
+    }
+
+    /// 8. Send Data using Data Port
+    s_cmd = strtok(a_recv_cmd_buf, " ");
+    if (!strcmp(s_cmd, "NLST")) {
+        write(s_data_fd, "ABOUT NLST ...\n\n", DATA_BUFF_SIZE);
+    }
+
+    write(a_cli_conn_fd, "226 Complete transmission.\n", CTRL_BUFF_SIZE);
+
+    close(s_data_fd);
+}
+
+
+/// TODO Add More Commands -PORT-, LS, GET, PUT, TYPE
+int serverExecuteCommand(int a_cli_conn_fd, char * a_recv_cmd_buf) {
+    char * s_cmd = NULL;
+    s_cmd = strtok(a_recv_cmd_buf, " \n");
+
+    if (!strcmp(s_cmd, "PORT")) {
+        char s_cli_ip[CTRL_BUFF_SIZE] = {0, };
+        unsigned int s_cli_port = 0;
+        ssize_t n;
+
+        /// 2. Send Response about PORT
+        serverParsingIpPort(NULL, s_cli_ip, &s_cli_port);
+        if (!s_cli_port) {
+            write(a_cli_conn_fd, "550 Failed to access.\n", CTRL_BUFF_SIZE);
+            return -1;
+        }
+        write(a_cli_conn_fd, "200 PORT performed successfully.\n", CTRL_BUFF_SIZE);
+
+        /// 5. Receive FTP Command
+        memset(a_recv_cmd_buf, 0, sizeof(*a_recv_cmd_buf));
+        n = read(a_cli_conn_fd, a_recv_cmd_buf, CTRL_BUFF_SIZE);
+        a_recv_cmd_buf[n] = '\0';
+
+        serverDataConnection(a_cli_conn_fd, s_cli_ip, s_cli_port, a_recv_cmd_buf);
+    }
+    else if (!strcmp(s_cmd, "PWD")) {
+        return serverPWD(a_cli_conn_fd);
+    }
+    else if (!strcmp(s_cmd, "CWD")) {
+        int s_opt_count = 1;
+        char * s_opt_value[100];
+        s_opt_value[0] = s_cmd;
+        s_opt_value[s_opt_count] = strtok(NULL, " \n");
+        while (s_opt_value[s_opt_count]) {
+            s_opt_count++;
+            s_opt_value[s_opt_count] = strtok(NULL, " \n");
+        }
+        return serverCWD(a_cli_conn_fd, s_opt_count, s_opt_value);
+    }
+    else if (!strcmp(s_cmd, "CDUP")) {
+        return serverCDUP(a_cli_conn_fd);
+    }
+    else {
+        write(STDOUT_FILENO, s_cmd, strlen(s_cmd));
+        write(a_cli_conn_fd, s_cmd, CTRL_BUFF_SIZE);
+    }
+    return 0;
+}
+
 
 /// main function
 int main(int argc, char *argv[]) {
@@ -119,25 +247,21 @@ int main(int argc, char *argv[]) {
         write(cli_conn_fd, "220 Akgop.github.io Connected\n", strlen("220 Akgop.github.io Connected\n"));
 
         /// Command Process
-        // TODO optimze command process
         while(1) {
-            /// 6. read command
+            /// 6. response commands from client
             memset(recv_cmd_buf, 0, sizeof(recv_cmd_buf));
             serverReceiveCommand(cli_conn_fd, recv_cmd_buf);
 
-            /// 7. close Connections
+            /// ** close Connections **
             if (!strncmp(recv_cmd_buf, "QUIT", strlen("QUIT"))) {
                 write(STDOUT_FILENO, "Server: QUIT\n", strlen("Server: QUIT\n"));
                 serverQuit(cli_conn_fd);
                 exit(0);
             }
-            else if (!strncmp(recv_cmd_buf, "PWD", strlen("PWD"))) {
-                serverPWD(cli_conn_fd);
-            }
-            else {
-                write(STDOUT_FILENO, recv_cmd_buf, strlen(recv_cmd_buf));
-                write(cli_conn_fd, recv_cmd_buf, CTRL_BUFF_SIZE);
-            }
+
+            /// 7. Execute Commands
+            // TODO error handling -> -1: error, 0: success
+            serverExecuteCommand(cli_conn_fd, recv_cmd_buf);
         }
 
     }
