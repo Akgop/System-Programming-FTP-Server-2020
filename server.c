@@ -9,11 +9,22 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <sys/stat.h>
+#include <stdbool.h>
+#include <dirent.h>
+#include <pwd.h>
+#include <grp.h>
+#include <time.h>
 
 #define CTRL_BUFF_SIZE 128
 #define DATA_BUFF_SIZE 1024
 #define PROPER_ARG_SIZE 2
 
+/// TODO optimize NLST
+int serverNLST(int a_opt_count, char* a_opt_value[], char* a_data_buf) {
+    strcpy(a_data_buf, "NLST SUCCESSFULLY DONE\n");
+    return 0;
+}
 
 /// TODO optimize CWD
 int serverCWD(int a_cli_conn_fd, int a_opt_count, char ** a_opt_value) {
@@ -31,8 +42,7 @@ int serverCWD(int a_cli_conn_fd, int a_opt_count, char ** a_opt_value) {
     }
 }
 
-
-/// TODO optimze CDUP
+/// TODO optimize CDUP
 int serverCDUP(int a_cli_conn_fd) {
     char s_ctrl_res_buf[CTRL_BUFF_SIZE];
     memset(s_ctrl_res_buf, 0, sizeof(s_ctrl_res_buf));
@@ -140,6 +150,9 @@ void serverDataConnection(int a_cli_conn_fd, char * a_ip, unsigned int a_port, c
     int s_data_fd;
     struct sockaddr_in s_data_addr;
     char * s_cmd = NULL;
+    char s_data_buf[DATA_BUFF_SIZE] = {0, };
+    int s_opt_count = 1;
+    char * s_opt_value[CTRL_BUFF_SIZE];
 
     if ((s_data_fd = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
         printf("Server: Can't open stream socket\n");
@@ -156,11 +169,13 @@ void serverDataConnection(int a_cli_conn_fd, char * a_ip, unsigned int a_port, c
         write(STDERR_FILENO, "Server: connection failed\n", strlen("Client: connection failed\n"));
         exit(1);
     }
+    write(a_cli_conn_fd, "150 Opening data connection\n", CTRL_BUFF_SIZE);
 
     /// 8. Send Data using Data Port
-    s_cmd = strtok(a_recv_cmd_buf, " ");
+    s_cmd = strtok(a_recv_cmd_buf, " \n");
     if (!strcmp(s_cmd, "NLST")) {
-        write(s_data_fd, "ABOUT NLST ...\n\n", DATA_BUFF_SIZE);
+        serverNLST(s_opt_count, s_opt_value, s_data_buf);
+        write(s_data_fd, s_data_buf, DATA_BUFF_SIZE);
     }
 
     write(a_cli_conn_fd, "226 Complete transmission.\n", CTRL_BUFF_SIZE);
@@ -191,7 +206,7 @@ int serverExecuteCommand(int a_cli_conn_fd, char * a_recv_cmd_buf) {
         memset(a_recv_cmd_buf, 0, sizeof(*a_recv_cmd_buf));
         n = read(a_cli_conn_fd, a_recv_cmd_buf, CTRL_BUFF_SIZE);
         a_recv_cmd_buf[n] = '\0';
-
+        printf("---> %s\n", a_recv_cmd_buf);
         serverDataConnection(a_cli_conn_fd, s_cli_ip, s_cli_port, a_recv_cmd_buf);
     }
     else if (!strcmp(s_cmd, "PWD")) {
@@ -261,6 +276,7 @@ int main(int argc, char *argv[]) {
 
             /// 7. Execute Commands
             // TODO error handling -> -1: error, 0: success
+            printf("---> %s\n", recv_cmd_buf);
             serverExecuteCommand(cli_conn_fd, recv_cmd_buf);
         }
 

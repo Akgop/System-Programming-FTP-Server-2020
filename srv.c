@@ -134,7 +134,7 @@ void myls_l(char * pathname, int len, int hidden, char *result_buff)
 				if((buf.st_mode)& S_IXOTH) result[9] = 'x';
 				else result[9] = '-';
 				strcat(result, " ");
-				sprintf(buff, "%2lu ", buf.st_nlink);	//link count
+				sprintf(buff, "%2hu ", buf.st_nlink);	//link count
 				strcat(result, buff);
 				user_info = getpwuid(buf.st_uid);	//user uid
 				if(user_info != NULL) strcat(result, user_info->pw_name);
@@ -142,7 +142,7 @@ void myls_l(char * pathname, int len, int hidden, char *result_buff)
 				group_info = getgrgid(buf.st_gid);	//group uid
 				if(group_info != NULL) strcat(result, group_info->gr_name);
 				strcat(result, " ");
-				sprintf(buff, "%6ld", buf.st_size);
+				sprintf(buff, "%6lld", buf.st_size);
 				strcat(result, buff);
 				strcat(result, " ");
 				ltp = localtime(&buf.st_mtime);	//modified time

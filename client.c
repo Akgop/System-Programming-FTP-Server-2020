@@ -205,6 +205,8 @@ void clientSendCommand(int a_cli_socket_fd, char * a_ip_port, char * a_ctrl_recv
         /// 7. Accept Data Connection
         s_recv_len = sizeof(*a_data_addr);
         s_recv_fd = accept(s_data_fd, (struct sockaddr *) a_data_addr, &s_recv_len);
+        read(a_cli_socket_fd, a_ctrl_recv_buf, CTRL_BUFF_SIZE);
+        write(STDOUT_FILENO, a_ctrl_recv_buf, CTRL_BUFF_SIZE);
 
         /// 8. Receive Data using Data Port
         read(s_recv_fd, s_recv_data_buf, DATA_BUFF_SIZE);
